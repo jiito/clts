@@ -89,7 +89,7 @@ class Decoder(nn.Module):
             # get the weight matrix
             W_dec = self.get_parameter(f"W_{i}")
 
-            prev_layer_features = x[:, : i - 1]
+            prev_layer_features = x[:, : i + 1, :]
 
             layer_predictions = einsum(
                 prev_layer_features,
@@ -98,22 +98,21 @@ class Decoder(nn.Module):
             )
 
             preds[:, i, :] = layer_predictions
+
             # TODO: add bias here
 
         return preds
 
 
 class CrossLayerTranscoder(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim):
+    def __init__(self, d_activations, d_features, n_layers):
         super().__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.output_dim = output_dim
+        self.d_activations = d_activations
+        self.d_features = d_features
+        self.n_layers = n_layers
 
-        assert self.input_dim == self.output_dim
-
-        self.encoder = Encoder(input_dim, hidden_dim)
-        self.decoder = Decoder(hidden_dim, output_dim)
+        self.encoder = Encoder(d_activations, d_features, n_layers)
+        self.decoder = Decoder(d_activations, d_features, n_layers)
 
     def forward(self, x):
         """ """
