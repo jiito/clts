@@ -1,5 +1,5 @@
 import torch
-from models.clt import CrossLayerTranscoder
+from clts.models.clt import CrossLayerTranscoder
 
 
 def test_clt():

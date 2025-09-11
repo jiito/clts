@@ -1,5 +1,5 @@
 import torch
-from models.clt import Encoder
+from clts.models.clt import Encoder
 
 
 def test_encoder():

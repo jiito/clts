@@ -1,5 +1,5 @@
 import torch
-from models.jump_relu import JumpReLU
+from clts.models.jump_relu import JumpReLU
 
 
 def test_jump_relu():

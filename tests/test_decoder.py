@@ -1,5 +1,5 @@
 import torch
-from models.clt import Decoder
+from clts.models.clt import Decoder
 
 
 def test_decoder():

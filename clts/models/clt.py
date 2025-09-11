@@ -3,7 +3,7 @@ from einops import einsum
 import torch as t
 from jaxtyping import Float
 
-from models.jump_relu import JumpReLU
+from clts.models.jump_relu import JumpReLU
 
 
 class Encoder(nn.Module):
