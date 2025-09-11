@@ -24,6 +24,7 @@ base_image = modal.Image.debian_slim(python_version="3.11").pip_install("pydanti
 
 torch_image = base_image.pip_install(
     "torch",
+    "hf_xet>=1.1.5",
     "numpy",
     "datasets",
     "einops",

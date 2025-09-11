@@ -31,7 +31,6 @@ def get_device() -> str:
 class ActivationCacheConfig(BaseModel):
     model_name: str
     dataset_path: str
-    save_path: str
     batch_size: int
     hg_token: str
 
@@ -42,6 +41,8 @@ def get_nnsight_model(model_name: str):
 
 def get_dataset_and_loader(cfg: ActivationCacheConfig):
     try:
+        print(f"Loading dataset: {cfg.dataset_path}")
+        print(f"Using token: {cfg.hg_token}")
         token_dataset = datasets.load_dataset(
             cfg.dataset_path,
             token=cfg.hg_token,
@@ -50,6 +51,8 @@ def get_dataset_and_loader(cfg: ActivationCacheConfig):
         loader = DataLoader(
             token_dataset,
             batch_size=cfg.batch_size * 4,
+            num_workers=4,
+            shuffle=True,
             pin_memory=True,
         )
     except Exception as e:
@@ -63,11 +66,8 @@ def extract_activations(
     llm: nnsight.LanguageModel, tokens, n_layers
 ) -> Float[torch.Tensor, "batch_size seq_len 2 n_layers d_model"]:
     device = get_device()
-    print(f"Using device: {device}")
-    print(f"Model is using device: {next(llm.parameters()).device}")
     llm.requires_grad_(False)
     tokens = tokens.to(device)
-    print(f"Tokens are on device: {tokens.get_device()}")
 
     llm.eval()
 
@@ -113,8 +113,9 @@ def compute_and_save_activations(
     config: ActivationCacheConfig,
     llm: nnsight.LanguageModel,
     max_dataset_size: int = 1000000,
+    save_path: str = "activations.h5",
 ):
-    with h5py.File(config.save_path, "w") as f:
+    with h5py.File(save_path, "w") as f:
         seq_len = min(llm.config.max_position_embeddings, 511)  # pick your window
 
         h5_dataset = f.create_dataset(
@@ -133,8 +134,6 @@ def compute_and_save_activations(
         dataset_size = h5_dataset.shape[0]
 
         for batch in tqdm.tqdm(loader):
-            print(f"{h5_pointer / dataset_size * 100:.1f}% done")
-
             tokenizer = llm.tokenizer
 
             if tokenizer.pad_token_id is None:
@@ -149,8 +148,6 @@ def compute_and_save_activations(
             )
 
             input_ids = enc["input_ids"].to(get_device())
-
-            timeout_trace(llm, input_ids)
 
             activations = extract_activations(llm, input_ids, llm.config.num_layers)
 
