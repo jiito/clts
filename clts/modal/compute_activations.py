@@ -37,12 +37,21 @@ def compute_activations(cfg: ActivationCacheConfig):
 
 @app.local_entrypoint()
 def main():
-    config = ActivationCacheConfig(
+    testing_config = ActivationCacheConfig(
         model_name="roneneldan/TinyStories-1Layer-21M",
         dataset_path="roneneldan/TinyStories",
         batch_size=48,
-        hg_token=HfFolder.get_token(),
+        hf_token=HfFolder.get_token(),
     )
+
+    prod_config = ActivationCacheConfig(
+        model_name="openai-community/gpt2",
+        dataset_path="roneneldan/TinyStories",
+        batch_size=16,
+        hf_token=HfFolder.get_token(),
+    )
+
+    config = prod_config
     print(config)
 
     compute_activations.remote(config)

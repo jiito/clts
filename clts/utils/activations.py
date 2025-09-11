@@ -32,7 +32,8 @@ class ActivationCacheConfig(BaseModel):
     model_name: str
     dataset_path: str
     batch_size: int
-    hg_token: str
+    # TODO: it doesn't make sense for this to be in the config because it shouldn't really change?
+    hf_token: str
 
 
 def get_nnsight_model(model_name: str):
@@ -42,10 +43,10 @@ def get_nnsight_model(model_name: str):
 def get_dataset_and_loader(cfg: ActivationCacheConfig):
     try:
         print(f"Loading dataset: {cfg.dataset_path}")
-        print(f"Using token: {cfg.hg_token}")
+        print(f"Using token: {cfg.hf_token}")
         token_dataset = datasets.load_dataset(
             cfg.dataset_path,
-            token=cfg.hg_token,
+            token=cfg.hf_token,
             split="train",
         )
         loader = DataLoader(
@@ -118,14 +119,16 @@ def compute_and_save_activations(
     with h5py.File(save_path, "w") as f:
         seq_len = min(llm.config.max_position_embeddings, 511)  # pick your window
 
+        n_layers, d_model = get_n_layers_and_d_model(llm)
+
         h5_dataset = f.create_dataset(
             "activations",
             # [dataset_size, 2 (in, out), n_layers, d_model]
             shape=(
                 min(len(loader) * config.batch_size * seq_len, max_dataset_size),
                 2,  # (in, out)
-                llm.config.num_layers,
-                llm.config.hidden_size,
+                n_layers,
+                d_model,
             ),
             dtype="float32",
         )
@@ -149,7 +152,11 @@ def compute_and_save_activations(
 
             input_ids = enc["input_ids"].to(get_device())
 
-            activations = extract_activations(llm, input_ids, llm.config.num_layers)
+            activations = extract_activations(
+                llm,
+                input_ids,
+                n_layers,
+            )
 
             token_activations = einops.rearrange(
                 activations,
@@ -170,3 +177,14 @@ def compute_and_save_activations(
                     token_activations.cpu().numpy()
                 )
                 h5_pointer += n_tokens
+
+
+def get_n_layers_and_d_model(llm: nnsight.LanguageModel) -> tuple[int, int]:
+    return (
+        llm.config.num_layers
+        if hasattr(llm.config, "num_layers")
+        else llm.config.n_layer,
+        llm.config.hidden_size
+        if hasattr(llm.config, "hidden_size")
+        else llm.config.n_embd,
+    )

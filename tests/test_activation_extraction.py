@@ -14,7 +14,7 @@ def test_activation_extraction():
         dataset_path="roneneldan/TinyStories",
         save_path="test_activations",
         batch_size=1,
-        hg_token=HfFolder.get_token(),
+        hf_token=HfFolder.get_token(),
     )
     _, loader = get_dataset_and_loader(cfg)
     model = get_nnsight_model(cfg.model_name)
