@@ -170,13 +170,22 @@ def compute_and_save_activations(
                 h5_dataset[h5_pointer:] = (
                     token_activations[:remaining_space].cpu().numpy()
                 )
-                print(f"Dataset full. Saved {dataset_size} token activations.")
+
                 break
             else:
                 h5_dataset[h5_pointer : h5_pointer + n_tokens] = (
                     token_activations.cpu().numpy()
                 )
                 h5_pointer += n_tokens
+
+        test_read_activations(save_path)
+
+
+def test_read_activations(save_path: str):
+    h5 = h5py.File(save_path, "r")
+    activations = h5["activations"][:]
+    print(activations.shape)
+    return activations
 
 
 def get_n_layers_and_d_model(llm: nnsight.LanguageModel) -> tuple[int, int]:

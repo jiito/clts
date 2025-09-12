@@ -1,3 +1,4 @@
+import time
 from huggingface_hub import HfFolder
 from clts.modal.app import app, gpu, HOURS, torch_image, volume_path, volume
 
@@ -30,6 +31,10 @@ def compute_activations(cfg: ActivationCacheConfig):
     time_dataset_next(loader, tag="train")
 
     compute_and_save_activations(loader, cfg, model, save_path=save_path.as_posix())
+
+    time.sleep(10)
+
+    volume.commit()
 
     # TODO: log output
     return
