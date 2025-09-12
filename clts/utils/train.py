@@ -1,4 +1,6 @@
 from jaxtyping import Float
+import modal
+import wandb
 import torch as t
 import tqdm
 
@@ -14,13 +16,28 @@ from clts.modal.app import app, gpu, HOURS, torch_image, volume_path, volume
     timeout=1 * HOURS,
     image=torch_image,
     volumes={volume_path: volume},
+    secrets=[modal.Secret.from_name("wandb-secret")],
 )
 def train():
     device = get_device()
 
-    # TODO: fix this path
     activations_path_h5_modal = volume_path / "activations" / "openai-community_gpt2.h5"
     batch_size = 32
+    epochs = 3
+    lr = 1e-3
+    lambda_ = 0.0007
+    c = 1
+
+    config = {
+        "batch_size": 32,
+        "activations_path_h5_modal": activations_path_h5_modal,
+        "epochs": epochs,
+        "lr": lr,
+        "lambda": lambda_,
+        "c": c,
+    }
+
+    wandb.init(project="gpt2-clts-modal", config=config)
 
     buffer = DiscBuffer(activations_path_h5_modal, accessor="activations")
     loader = t.utils.data.DataLoader(
@@ -34,20 +51,22 @@ def train():
     )
 
     model = CrossLayerTranscoder(d_activations=768, d_features=768 * 8, n_layers=12)
+    wandb.watch(model, log="all", log_freq=15)
 
     model = model.to(device)
 
-    optimizer = t.optim.AdamW(model.parameters(), lr=1e-3)
-
-    epochs = 3
+    optimizer = t.optim.AdamW(model.parameters(), lr=lr)
 
     loss_list = []
+
+    examples_seen = 0
 
     for epoch in range(epochs):
         pbar = tqdm.tqdm(loader)
 
+        model.train()
+
         for batch in pbar:
-            # Move data to device, perform forward pass
             assert batch.shape == (batch_size, 2, 12, 768)
             mlp_in = batch[:, 0, :, :]
             mlp_in = mlp_in.to(device)
@@ -57,33 +76,42 @@ def train():
             assert mlp_out.shape == (batch_size, 12, 768)
             logits, encoder_out, concat_w_dec = model(mlp_in)
 
-            try:
-                assert mlp_out.device == logits.device
-            except Exception as e:
-                print(e)
-                print(
-                    mlp_out.device,
-                    logits.device,
-                    encoder_out.device,
-                )
-                raise e
-
             loss = sparsity_loss(
                 mlp_out=mlp_out,
                 encoder_out=encoder_out,
                 logits=logits,
                 decoder_weights_per_layer=concat_w_dec,
-                lambda_=1,
-                c=1,
+                lambda_=lambda_,
+                c=c,
             )
 
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
 
+            examples_seen += batch.shape[0]
+
+            wandb.log(
+                {
+                    "loss": loss.item(),
+                },
+                step=examples_seen,
+            )
+
             # Update logs & progress bar
             loss_list.append(loss.item())
             pbar.set_postfix(epoch=f"{epoch + 1}/{epochs}", loss=f"{loss:.3f}")
+
+    wandb.finish()
+
+
+@t.inference_mode()
+def evaluate(
+    model: CrossLayerTranscoder,
+):
+    model.eval()
+
+    pass
 
 
 def sparsity_loss(
