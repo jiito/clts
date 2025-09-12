@@ -21,3 +21,8 @@ dependencies = [
     "torch>=2.8.0",
     "tqdm>=4.67.1",
 ]
+
+[tool.ruff.lint]
+    ignore = [
+        "F722", # Ignore typehint errors for jaxtyping  
+    ]
