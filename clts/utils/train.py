@@ -19,13 +19,13 @@ def train():
     device = get_device()
 
     # TODO: fix this path
-    activations_path_h5_modal = "/vol/data/activations/openai-community_gpt2.h5"
+    activations_path_h5_modal = volume_path / "activations" / "openai-community_gpt2.h5"
     batch_size = 32
 
-    buffer = DiscBuffer(activations_path_h5_modal)
+    buffer = DiscBuffer(activations_path_h5_modal, accessor="activations")
     loader = t.utils.data.DataLoader(
         buffer,
-        num_workers=20,
+        num_workers=15,
         prefetch_factor=2,
         batch_size=batch_size,
         shuffle=True,
@@ -34,6 +34,8 @@ def train():
     )
 
     model = CrossLayerTranscoder(d_activations=768, d_features=768 * 8, n_layers=12)
+
+    model = model.to(device)
 
     optimizer = t.optim.AdamW(model.parameters(), lr=1e-3)
 
@@ -46,12 +48,35 @@ def train():
 
         for batch in pbar:
             # Move data to device, perform forward pass
-            batch = batch.to(device)
-            # TODO: check shape
-            logits = model(batch)
+            assert batch.shape == (batch_size, 2, 12, 768)
+            mlp_in = batch[:, 0, :, :]
+            mlp_in = mlp_in.to(device)
+            assert mlp_in.shape == (batch_size, 12, 768)
+            mlp_out = batch[:, 1, :, :]
+            mlp_out = mlp_out.to(device)
+            assert mlp_out.shape == (batch_size, 12, 768)
+            logits, encoder_out, concat_w_dec = model(mlp_in)
 
-            # Calculate loss
-            loss = sparsity_loss(batch, logits)
+            try:
+                assert mlp_out.device == logits.device
+            except Exception as e:
+                print(e)
+                print(
+                    mlp_out.device,
+                    logits.device,
+                    encoder_out.device,
+                )
+                raise e
+
+            loss = sparsity_loss(
+                mlp_out=mlp_out,
+                encoder_out=encoder_out,
+                logits=logits,
+                decoder_weights_per_layer=concat_w_dec,
+                lambda_=1,
+                c=1,
+            )
+
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
@@ -65,7 +90,7 @@ def sparsity_loss(
     mlp_out: Float[t.Tensor, "batch_size n_layers d_activations"],
     encoder_out: Float[t.Tensor, "batch_size n_layers d_features"],
     logits: Float[t.Tensor, "batch_size n_layers d_activations"],
-    decoder_weights: Float[t.Tensor, "n_layers d_features d_activations"],
+    decoder_weights_per_layer: Float[t.Tensor, "n_layers d_features d_activations"],
     lambda_: float,
     c: float,
 ) -> float:
@@ -75,13 +100,15 @@ def sparsity_loss(
 
     mse_term = t.norm(t.subtract(mlp_out, logits), p=2, dim=-1).square().sum(dim=1)
     # The regularization is the  sum over every feature for every layer tanh(c * norm of W_dec(layer, feature) * post-mlp acts)
-    regularization_term = (
-        (t.mul(t.norm(decoder_weights, dim=-1), encoder_out) * c)
-        .tanh()
-        .sum(dim=[-2, -1])
-    ) * lambda_
-
-    loss = mse_term + regularization_term
+    regularization_term = 0
+    for layer_l, decoder_weights in enumerate(decoder_weights_per_layer):
+        layer_reg = (
+            (t.mul(t.norm(decoder_weights, dim=-1), encoder_out) * c)
+            .tanh()
+            .sum(dim=[-2, -1])
+        )
+        regularization_term += layer_reg
+    loss = mse_term + (regularization_term * lambda_)
 
     return loss.mean()
 

@@ -88,7 +88,9 @@ class Decoder(nn.Module):
         # run over the layers and compute predictions for each
 
         batch_size = x.shape[0]
-        preds = t.empty((batch_size, self.n_layers, self.d_activations))
+        preds = t.empty(
+            (batch_size, self.n_layers, self.d_activations), device=x.device
+        )
 
         for i in range(self.n_layers):
             # get the weight matrix
@@ -134,7 +136,6 @@ class CrossLayerTranscoder(nn.Module):
         concat_w_dec = []
         for i in range(self.n_layers):
             layer_w_dec = self.decoder.decoder_weights_for_layer(i)
-            print(f"layer_w_dec.shape: {layer_w_dec.shape}")
 
             concat_for_feat = einops.rearrange(layer_w_dec, "i f a -> f (a i)")
 
