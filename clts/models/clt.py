@@ -15,21 +15,20 @@ class Encoder(nn.Module):
         self.d_features = d_features
         self.n_layers = n_layers
 
-        # set activation function
-        # TODO: in other implementations, the non-linearity is in the main module not the encoder
-        self.activation_func = JumpReLU()
-
         #  setup the encoder weights
         # shape: [n_layers, d_activations, d_features]
-        self.W_enc = nn.Parameter(t.randn((n_layers, d_activations, d_features)))
+        self.W_enc = nn.Parameter(t.empty((n_layers, d_activations, d_features)))
 
-        # TODO: we can include a bias term as well
+        self.b = nn.Parameter(t.empty((n_layers, d_features)))
 
         self.reset_parameters()
 
     def reset_parameters(self):
-        # This is a standard pytorch method that inits the parameters
-        # TODO: here we might optimize how we init the weight mats
+        # Taken from: https://github.com/Goreg12345/crosslayer-transcoder/blob/master/crosslayer_transcoder/model/clt.py
+        enc_uniform_thresh = 1 / (self.d_features**0.5)
+        self.W_enc.data.uniform_(-enc_uniform_thresh, enc_uniform_thresh)
+        self.b.data.zero_()
+
         pass
 
     def forward(
@@ -50,12 +49,6 @@ class Encoder(nn.Module):
         # Note: this is for pytorch memory management
         activations = activations.contiguous()
 
-        # apply non-linearity
-
-        activations: Float[t.Tensor, "batch_size n_layers d_features"] = (
-            self.activation_func(activations)
-        )
-
         return activations
 
 
@@ -66,12 +59,26 @@ class Decoder(nn.Module):
         self.d_features = d_features
         self.n_layers = n_layers
 
+        self.b = nn.Parameter(t.empty((n_layers, d_activations)))
+
         # register W_dec for each layer
         for i in range(n_layers):
             # for each layer we have to create a decoder weight with shape [i+1, d_features, d_activations]
             self.register_parameter(
-                f"W_{i}", nn.Parameter(t.randn((i + 1, d_features, d_activations)))
+                f"W_{i}", nn.Parameter(t.empty((i + 1, d_features, d_activations)))
             )
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        # copied from: https://github.com/Goreg12345/crosslayer-transcoder/blob/master/crosslayer_transcoder/model/clt.py
+        dec_uniform_thresh = 1 / ((self.d_activations * self.n_layers) ** 0.5)
+        for i in range(self.n_layers):
+            self.get_parameter(f"W_{i}").data.uniform_(
+                -dec_uniform_thresh, dec_uniform_thresh
+            )
+
+        self.b.data.zero_()
 
     def decoder_weights_for_layer(self, layer_index: int):
         return self.get_parameter(f"W_{layer_index}")
@@ -120,6 +127,7 @@ class CrossLayerTranscoder(nn.Module):
 
         self.encoder = Encoder(d_activations, d_features, n_layers)
         self.decoder = Decoder(d_activations, d_features, n_layers)
+        self.activation_fun = JumpReLU()
 
     def forward(
         self, x: Float[t.Tensor, "batch_size n_layers d_activations"]
@@ -129,9 +137,11 @@ class CrossLayerTranscoder(nn.Module):
         List[Float[t.Tensor, "d_features concat_activations"]],  # concat_w_dec
     ]:
         """ """
-        # TODO: we have to move the jumprelu activation step here because we need the encoder outputs before the non-linearity
         encoder_out = self.encoder(x)
-        logits = self.decoder(encoder_out)
+
+        act_out = self.activation_fun(encoder_out)
+
+        logits = self.decoder(act_out)
 
         concat_w_dec = []
         for i in range(self.n_layers):
