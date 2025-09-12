@@ -1,3 +1,4 @@
+from jaxtyping import Float
 import torch as t
 import tqdm
 
@@ -49,8 +50,8 @@ def train():
             # TODO: check shape
             logits = model(batch)
 
-            # Calculate loss, perform backward pass
-            loss = 1
+            # Calculate loss
+            loss = sparsity_loss(batch, logits)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
@@ -58,6 +59,31 @@ def train():
             # Update logs & progress bar
             loss_list.append(loss.item())
             pbar.set_postfix(epoch=f"{epoch + 1}/{epochs}", loss=f"{loss:.3f}")
+
+
+def sparsity_loss(
+    mlp_out: Float[t.Tensor, "batch_size n_layers d_activations"],
+    encoder_out: Float[t.Tensor, "batch_size n_layers d_features"],
+    logits: Float[t.Tensor, "batch_size n_layers d_activations"],
+    decoder_weights: Float[t.Tensor, "n_layers d_features d_activations"],
+    lambda_: float,
+    c: float,
+) -> float:
+    """
+    The loss function is MSE of the logits vs the actual post-mlp activations
+    """
+
+    mse_term = t.norm(t.subtract(mlp_out, logits), p=2, dim=-1).square().sum(dim=1)
+    # The regularization is the  sum over every feature for every layer tanh(c * norm of W_dec(layer, feature) * post-mlp acts)
+    regularization_term = (
+        (t.mul(t.norm(decoder_weights, dim=-1), encoder_out) * c)
+        .tanh()
+        .sum(dim=[-2, -1])
+    ) * lambda_
+
+    loss = mse_term + regularization_term
+
+    return loss.mean()
 
 
 @app.local_entrypoint()
