@@ -33,5 +33,6 @@ torch_image = base_image.pip_install(
     "nnsight",
     "tqdm",
 )
+torch_image = torch_image.pip_install("wandb")
 
 torch_image = torch_image.add_local_python_source("clts")
