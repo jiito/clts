@@ -1,3 +1,5 @@
+from typing import List, Tuple
+import einops
 import torch.nn as nn
 from einops import einsum
 import torch as t
@@ -71,6 +73,9 @@ class Decoder(nn.Module):
                 f"W_{i}", nn.Parameter(t.randn((i + 1, d_features, d_activations)))
             )
 
+    def decoder_weights_for_layer(self, layer_index: int):
+        return self.get_parameter(f"W_{layer_index}")
+
     def forward(
         self, x: Float[t.Tensor, "batch_size n_layers d_features"]
     ) -> Float[t.Tensor, "batch_size n_layers d_activations"]:
@@ -94,7 +99,7 @@ class Decoder(nn.Module):
             layer_predictions = einsum(
                 prev_layer_features,
                 W_dec,
-                f"batch_size n_layers d_features, n_layers d_features d_activations -> batch_size d_activations",
+                "batch_size n_layers d_features, n_layers d_features d_activations -> batch_size d_activations",
             )
 
             preds[:, i, :] = layer_predictions
@@ -114,7 +119,25 @@ class CrossLayerTranscoder(nn.Module):
         self.encoder = Encoder(d_activations, d_features, n_layers)
         self.decoder = Decoder(d_activations, d_features, n_layers)
 
-    def forward(self, x):
+    def forward(
+        self, x: Float[t.Tensor, "batch_size n_layers d_activations"]
+    ) -> Tuple[
+        Float[t.Tensor, "batch_size n_layers d_activations"],  # logits
+        Float[t.Tensor, "batch_size n_layers d_features"],  # encoder_out
+        List[Float[t.Tensor, "d_features concat_activations"]],  # concat_w_dec
+    ]:
         """ """
-        x = self.encoder(x)
-        return self.decoder(x)
+        # TODO: we have to move the jumprelu activation step here because we need the encoder outputs before the non-linearity
+        encoder_out = self.encoder(x)
+        logits = self.decoder(encoder_out)
+
+        concat_w_dec = []
+        for i in range(self.n_layers):
+            layer_w_dec = self.decoder.decoder_weights_for_layer(i)
+            print(f"layer_w_dec.shape: {layer_w_dec.shape}")
+
+            concat_for_feat = einops.rearrange(layer_w_dec, "i f a -> f (a i)")
+
+            concat_w_dec.append(concat_for_feat)
+
+        return logits, encoder_out, concat_w_dec
