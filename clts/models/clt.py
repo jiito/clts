@@ -5,7 +5,8 @@ from einops import einsum
 import torch as t
 from jaxtyping import Float
 
-from clts.models.jump_relu import JumpReLU
+# from clts.models.jump_relu import JumpReLU
+from clts.models.georg_jumprelu import JumpReLU
 
 
 class Encoder(nn.Module):
@@ -127,7 +128,9 @@ class CrossLayerTranscoder(nn.Module):
 
         self.encoder = Encoder(d_activations, d_features, n_layers)
         self.decoder = Decoder(d_activations, d_features, n_layers)
-        self.activation_fun = JumpReLU()
+        self.activation_fun = JumpReLU(
+            theta=0.03, bandwidth=1.0, n_layers=n_layers, d_features=d_features
+        )
 
     def forward(
         self, x: Float[t.Tensor, "batch_size n_layers d_activations"]

@@ -25,8 +25,8 @@ def train():
     batch_size = 32
     epochs = 3
     lr = 1e-3
-    lambda_ = 0.0007
-    c = 1
+    lambda_ = 0.0002
+    c = 0.1
 
     config = {
         "batch_size": 32,
