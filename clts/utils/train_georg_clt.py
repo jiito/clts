@@ -6,6 +6,7 @@ import tqdm
 
 from clts.modal.app import app
 from clts.models.clt import CrossLayerTranscoder
+from clts.models.georg_clt import CrosslayerDecoder
 from clts.utils.activations import get_device
 from clts.utils.buffer import DiscBuffer
 from clts.modal.app import app, gpu, HOURS, torch_image, volume_path, volume
@@ -65,31 +66,24 @@ def train():
 
     examples_seen = 0
 
+    output_standardizer = model.output_standardizer
+    current_sparsity_penalty = model.current_sparsity_penalty
+    use_tanh = True
+
     for epoch in range(epochs):
         pbar = tqdm.tqdm(loader)
 
         model.train()
 
         for batch_idx, batch in enumerate(pbar):
-            if batch_idx == 0:
-                model.initialize_standardizers(batch)
-
-            assert batch.shape == (batch_size, 2, 12, 768)
-            mlp_in = batch[:, 0, :, :]
-            mlp_in = mlp_in.to(device)
-            assert mlp_in.shape == (batch_size, 12, 768)
-            mlp_out = batch[:, 1, :, :]
-            mlp_out = mlp_out.to(device)
-            assert mlp_out.shape == (batch_size, 12, 768)
-            logits, encoder_out, concat_w_dec = model(mlp_in)
-
-            loss = sparsity_loss(
-                mlp_out=mlp_out,
-                encoder_out=encoder_out,
-                logits=logits,
-                decoder_weights_per_layer=concat_w_dec,
-                lambda_=lambda_,
-                c=c,
+            loss = training_step(
+                batch_idx,
+                batch,
+                model,
+                output_standardizer,
+                c,
+                current_sparsity_penalty,
+                use_tanh,
             )
 
             loss.backward()
@@ -98,18 +92,83 @@ def train():
 
             examples_seen += batch.shape[0]
 
-            wandb.log(
-                {
-                    "loss": loss.item(),
-                },
-                step=examples_seen,
-            )
-
-            # Update logs & progress bar
-            loss_list.append(loss.item())
             pbar.set_postfix(epoch=f"{epoch + 1}/{epochs}", loss=f"{loss:.3f}")
 
     wandb.finish()
+
+
+def current_sparsity_penalty(max_steps, global_step, _lambda):
+    n_steps = max_steps
+    current_step = global_step  # use global step instead of batch idx to work with gradient accumulation
+    cur_lambda = _lambda * (current_step / n_steps)
+    wandb.log(
+        {
+            "training/sparsity_penalty": cur_lambda,
+        },
+        step=global_step,
+    )
+    return cur_lambda
+
+
+def training_step(
+    batch_idx, batch, model, output_standardizer, c, current_sparsity_penalty, use_tanh
+):
+    # Initialize standardizers
+    if batch_idx == 0:
+        model.initialize_standardizers(batch)
+
+    # Forward pass
+    resid, mlp_out = batch[:, 0], batch[:, 1]
+    pre_actvs, features, recons_norm, recons = model.forward(resid)
+
+    # self.update_dead_features(features)
+    # Compute MSE loss
+    mse = (recons_norm - output_standardizer.standardize(mlp_out)) ** 2
+
+    # Compute Sparsity Loss
+    # with torch.no_grad():
+    if isinstance(model.decoder, CrosslayerDecoder):
+        dec_norms = t.zeros_like(features[:1])
+        for l in range(model.decoder.n_layers):
+            W = model.decoder.get_parameter(
+                f"W_{l}"
+            )  # (from_layer, d_features, d_acts)
+            dec_norms[:, : l + 1] = dec_norms[:, : l + 1] + (W**2).sum(dim=-1)
+        dec_norms = dec_norms.sqrt()
+
+    weighted_features = features * dec_norms * c
+    wandb.log(
+        {
+            "model/weighted_features_mean": weighted_features.detach().mean().cpu(),
+        },
+        step=batch_idx,
+    )
+
+    if use_tanh:
+        weighted_features = t.tanh(
+            weighted_features
+        )  # (batch_size, n_layers, d_features)
+    sparsity = current_sparsity_penalty() * weighted_features.sum(dim=[1, 2]).mean()
+    wandb.log(
+        {
+            "training/sparsity_loss": sparsity,
+        },
+        step=batch_idx,
+    )
+
+    loss = mse.mean() + sparsity
+    wandb.log(
+        {
+            "training/loss": loss,
+        },
+        step=batch_idx,
+    )
+
+    # # Log training metrics
+    # if batch_idx % log_metrics_every == 0:
+    #     log_training_metrics(features, recons_norm, recons, mlp_out, batch_idx)
+
+    return loss
 
 
 @t.inference_mode()

@@ -7,6 +7,10 @@ from jaxtyping import Float
 
 # from clts.models.jump_relu import JumpReLU
 from clts.models.georg_jumprelu import JumpReLU
+from clts.models.standardizer import (
+    DimensionwiseInputStandardizer,
+    DimensionwiseOutputStandardizer,
+)
 
 
 class Encoder(nn.Module):
@@ -131,6 +135,26 @@ class CrossLayerTranscoder(nn.Module):
         self.activation_fun = JumpReLU(
             theta=0.03, bandwidth=1.0, n_layers=n_layers, d_features=d_features
         )
+
+        # following standardization technique of georg
+        self.input_standardizer = DimensionwiseInputStandardizer(
+            n_layers=n_layers, activation_dim=d_activations
+        )
+        self.output_standardizer = DimensionwiseOutputStandardizer(
+            n_layers=n_layers, activation_dim=d_activations
+        )
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.encoder.reset_parameters()
+        self.decoder.reset_parameters()
+
+    def initialize_standardizers(
+        self, batch: Float[t.Tensor, "batch_size io n_layers d_acts"]
+    ):
+        self.input_standardizer.initialize_from_batch(batch)
+        self.output_standardizer.initialize_from_batch(batch)
 
     def forward(
         self, x: Float[t.Tensor, "batch_size n_layers d_activations"]
