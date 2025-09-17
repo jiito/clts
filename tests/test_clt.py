@@ -11,10 +11,13 @@ def test_clt():
     clt = CrossLayerTranscoder(
         d_activations=d_activations, d_features=d_features, n_layers=n_layers
     )
-    x = torch.randn((batch_size, n_layers, d_activations))
-    logits, encoder_out, concat_w_dec = clt.forward(x)
+    x = torch.randn((batch_size, 2, n_layers, d_activations))
 
-    assert logits.shape == x.shape
+    clt.initialize_standardizers(x)
+
+    logits, encoder_out, concat_w_dec = clt.forward(x[:, 0])
+
+    assert logits.shape == (batch_size, n_layers, d_activations)
 
     assert encoder_out.shape == (batch_size, n_layers, d_features)
 
