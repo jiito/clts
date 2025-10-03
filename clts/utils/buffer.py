@@ -1,3 +1,4 @@
+# Taken from: https://github.com/Goreg12345/crosslayer-transcoder/blob/master/crosslayer_transcoder/model/clt.py
 import torch
 from torch.utils.data import Dataset
 import h5py
